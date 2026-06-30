@@ -24,6 +24,8 @@ mono_crash.*
 
 # Build results
 [Dd]ebug/
+!src/AiKnowledgePlatform.Api/Features/Debug/
+!src/AiKnowledgePlatform.Api/Features/Debug/**
 [Dd]ebugPublic/
 [Rr]elease/
 [Rr]eleases/
