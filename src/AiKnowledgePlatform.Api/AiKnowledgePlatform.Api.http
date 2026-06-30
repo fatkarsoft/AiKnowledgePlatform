@@ -1,0 +1,6 @@
+@AiKnowledgePlatform.Api_HostAddress = http://localhost:5034
+
+GET {{AiKnowledgePlatform.Api_HostAddress}}/health
+Accept: application/json
+
+###

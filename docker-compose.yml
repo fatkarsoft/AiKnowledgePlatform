@@ -1,0 +1,30 @@
+services:
+  postgres:
+    image: postgres:17
+    container_name: ai-knowledge-platform-postgres
+    environment:
+      POSTGRES_DB: ai_knowledge_platform
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+
+  redis:
+    image: redis:7
+    container_name: ai-knowledge-platform-redis
+    ports:
+      - "6379:6379"
+
+  qdrant:
+    image: qdrant/qdrant:v1.14.1
+    container_name: ai-knowledge-platform-qdrant
+    ports:
+      - "6333:6333"
+    volumes:
+      - qdrant-data:/qdrant/storage
+
+volumes:
+  postgres-data:
+  qdrant-data:

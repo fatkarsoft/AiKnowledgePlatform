@@ -1,0 +1,8 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/AiKnowledgePlatform.Api/AiKnowledgePlatform.Api.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/AiKnowledgePlatform.Tests/AiKnowledgePlatform.Tests.csproj" />
+  </Folder>
+</Solution>
