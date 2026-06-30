@@ -43,7 +43,7 @@ public sealed class HybridSearchService
             .ToArray();
     }
 
-    private static IReadOnlyList<SearchCandidate> MergeCandidates(
+    public static IReadOnlyList<SearchCandidate> MergeCandidates(
         IReadOnlyList<SearchResult> semanticResults,
         IReadOnlyList<SearchResult> lexicalResults)
     {

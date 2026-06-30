@@ -8,6 +8,7 @@ using AiKnowledgePlatform.Api.Features.Documents;
 using AiKnowledgePlatform.Api.Features.Documents.Chunking;
 using AiKnowledgePlatform.Api.Features.Documents.Embeddings;
 using AiKnowledgePlatform.Api.Features.Chat;
+using AiKnowledgePlatform.Api.Features.Debug;
 using AiKnowledgePlatform.Api.Features.Search;
 using AiKnowledgePlatform.Api.Storage;
 using Microsoft.AspNetCore.Hosting;
@@ -386,6 +387,53 @@ public sealed class DocumentsEndpointTests : IClassFixture<WebApplicationFactory
         Assert.NotNull(chatResponse);
         Assert.Equal("Sağlanan bağlamda bu soruyu cevaplamak için yeterli bilgi yok.", chatResponse.Answer);
         Assert.Empty(chatResponse.Sources);
+    }
+
+    [Fact]
+    public async Task RetrievalDebug_WithoutQuestion_ReturnsBadRequest()
+    {
+        var client = _factory.CreateClient();
+
+        var response = await client.PostAsJsonAsync("/debug/retrieval", new RetrievalDebugRequest("", null, null));
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task RetrievalDebug_WithValidQuestion_ReturnsPipelineStages()
+    {
+        var client = _factory.CreateClient();
+
+        var response = await client.PostAsJsonAsync(
+            "/debug/retrieval",
+            new RetrievalDebugRequest("Redis nedir?", null, 1));
+        var debugResponse = await response.Content.ReadFromJsonAsync<RetrievalDebugResponse>();
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.NotNull(debugResponse);
+        Assert.Equal("Redis nedir?", debugResponse.Question);
+        Assert.NotEmpty(debugResponse.SemanticCandidates);
+        Assert.NotEmpty(debugResponse.LexicalCandidates);
+        Assert.NotEmpty(debugResponse.MergedCandidates);
+        Assert.NotEmpty(debugResponse.RerankedCandidates);
+        Assert.Single(debugResponse.PromptContext);
+        Assert.True(debugResponse.MergedCandidates[0].FromSemantic);
+        Assert.True(debugResponse.MergedCandidates[0].FromLexical);
+    }
+
+    [Fact]
+    public async Task RetrievalDebug_DeduplicatesMergedCandidates()
+    {
+        var client = _factory.CreateClient();
+
+        var response = await client.PostAsJsonAsync(
+            "/debug/retrieval",
+            new RetrievalDebugRequest("Redis nedir?", null, null));
+        var debugResponse = await response.Content.ReadFromJsonAsync<RetrievalDebugResponse>();
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.NotNull(debugResponse);
+        Assert.Single(debugResponse.MergedCandidates);
     }
 
     [Fact]

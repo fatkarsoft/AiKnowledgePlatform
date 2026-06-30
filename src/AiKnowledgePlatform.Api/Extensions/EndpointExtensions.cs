@@ -1,4 +1,5 @@
 using AiKnowledgePlatform.Api.Features.Chat;
+using AiKnowledgePlatform.Api.Features.Debug;
 using AiKnowledgePlatform.Api.Features.Documents;
 using AiKnowledgePlatform.Api.Features.Health;
 using AiKnowledgePlatform.Api.Features.Search;
@@ -26,6 +27,7 @@ public static class EndpointExtensions
         app.MapHealthEndpoint();
         app.MapSearchEndpoint();
         app.MapChatEndpoint();
+        app.MapRetrievalDebugEndpoint();
 
         return app;
     }
