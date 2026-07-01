@@ -28,6 +28,7 @@ public static class EndpointExtensions
         app.MapSearchEndpoint();
         app.MapChatEndpoint();
         app.MapRetrievalDebugEndpoint();
+        app.MapQdrantDebugEndpoint();
 
         return app;
     }

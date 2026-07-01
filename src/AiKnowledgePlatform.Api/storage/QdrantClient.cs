@@ -6,6 +6,7 @@ using AiKnowledgePlatform.Api.Features.Documents;
 using AiKnowledgePlatform.Api.Features.Documents.Chunking;
 using AiKnowledgePlatform.Api.Features.Documents.Embeddings;
 using AiKnowledgePlatform.Api.Features.Search;
+using Microsoft.Extensions.Logging;
 
 namespace AiKnowledgePlatform.Api.Storage;
 
@@ -19,16 +20,23 @@ public class QdrantClient
     private readonly HttpClient _httpClient;
     private readonly string _collectionName;
     private readonly int _vectorSize;
+    private readonly ILogger<QdrantClient>? _logger;
 
-    public QdrantClient(HttpClient httpClient, IConfiguration configuration)
+    public QdrantClient(
+        HttpClient httpClient,
+        IConfiguration configuration,
+        ILogger<QdrantClient>? logger = null)
     {
         _httpClient = httpClient;
+        _logger = logger;
         _collectionName = configuration["Qdrant:CollectionName"] ?? "document_chunks";
         _vectorSize = int.TryParse(configuration["Qdrant:VectorSize"], out var vectorSize) ? vectorSize : 768;
 
         var baseUrl = configuration["Qdrant:BaseUrl"] ?? "http://localhost:6333";
         _httpClient.BaseAddress = new Uri(baseUrl);
     }
+
+    public string CollectionName => _collectionName;
 
     public virtual async Task EnsureCollectionAsync(CancellationToken cancellationToken = default)
     {
@@ -119,13 +127,11 @@ public class QdrantClient
         int limit,
         CancellationToken cancellationToken = default)
     {
-        var request = new ScrollPointsRequest(
-            new QdrantFilter(
-            [
-                new TextMatchCondition("text", new TextMatch(query))
-            ]),
-            limit,
-            true);
+        var request = CreateTextSearchRequest(query, limit);
+        var requestBody = JsonSerializer.Serialize(request, JsonOptions);
+
+        _logger?.LogInformation("Qdrant lexical search term: {SearchTerm}", query);
+        _logger?.LogInformation("Qdrant lexical search request: {RequestBody}", requestBody);
 
         using var response = await _httpClient.PostAsJsonAsync(
             $"/collections/{_collectionName}/points/scroll",
@@ -133,13 +139,16 @@ public class QdrantClient
             JsonOptions,
             cancellationToken);
 
+        var responseBody = await response.Content.ReadAsStringAsync(cancellationToken);
+
+        _logger?.LogInformation("Qdrant lexical search HTTP status: {StatusCode}", (int)response.StatusCode);
+        _logger?.LogInformation("Qdrant lexical search raw response body: {ResponseBody}", responseBody);
+
         response.EnsureSuccessStatusCode();
 
-        var scrollResponse = await response.Content.ReadFromJsonAsync<QdrantScrollResponse>(
-            JsonOptions,
-            cancellationToken);
+        var scrollResponse = JsonSerializer.Deserialize<QdrantScrollResponse>(responseBody, JsonOptions);
 
-        return scrollResponse?.Result.Points
+        return scrollResponse?.Result?.Points
             .Where(point => point.Payload is not null)
             .Select(point => new SearchResult(
                 point.Payload!.DocumentId,
@@ -148,6 +157,57 @@ public class QdrantClient
                 point.Payload.Text,
                 point.Payload.FileName))
             .ToArray() ?? [];
+    }
+
+    public virtual async Task<string> GetCollectionRawAsync(CancellationToken cancellationToken = default)
+    {
+        using var response = await _httpClient.GetAsync(
+            $"/collections/{_collectionName}",
+            cancellationToken);
+        var responseBody = await response.Content.ReadAsStringAsync(cancellationToken);
+
+        response.EnsureSuccessStatusCode();
+
+        return responseBody;
+    }
+
+    public virtual async Task<QdrantDebugHttpResult> SearchByTextDebugAsync(
+        string term,
+        int limit,
+        CancellationToken cancellationToken = default)
+    {
+        var request = CreateTextSearchRequest(term, limit);
+        var responseBody = await PostScrollDebugAsync(request, cancellationToken);
+
+        return responseBody;
+    }
+
+    public virtual async Task<QdrantDebugHttpResult> ScrollDebugAsync(
+        int limit,
+        CancellationToken cancellationToken = default)
+    {
+        var request = new ScrollPointsRequest(
+            Filter: null,
+            Limit: limit,
+            WithPayload: true);
+
+        return await PostScrollDebugAsync(request, cancellationToken);
+    }
+
+    private async Task<QdrantDebugHttpResult> PostScrollDebugAsync(
+        ScrollPointsRequest request,
+        CancellationToken cancellationToken)
+    {
+        using var response = await _httpClient.PostAsJsonAsync(
+            $"/collections/{_collectionName}/points/scroll",
+            request,
+            JsonOptions,
+            cancellationToken);
+        var responseBody = await response.Content.ReadAsStringAsync(cancellationToken);
+
+        response.EnsureSuccessStatusCode();
+
+        return new QdrantDebugHttpResult(request, (int)response.StatusCode, responseBody);
     }
 
     private async Task EnsureTextPayloadIndexAsync(CancellationToken cancellationToken)
@@ -186,6 +246,17 @@ public class QdrantClient
         bytes[8] = (byte)((bytes[8] & 0x3F) | 0x80);
 
         return new Guid(bytes).ToString();
+    }
+
+    private static ScrollPointsRequest CreateTextSearchRequest(string query, int limit)
+    {
+        return new ScrollPointsRequest(
+            new QdrantFilter(
+            [
+                new TextMatchCondition("text", new TextMatch(query))
+            ]),
+            limit,
+            true);
     }
 
     private sealed record CreateCollectionRequest(
@@ -241,7 +312,7 @@ public class QdrantClient
         [property: JsonPropertyName("max_token_len")] int MaxTokenLen);
 
     private sealed record ScrollPointsRequest(
-        [property: JsonPropertyName("filter")] QdrantFilter Filter,
+        [property: JsonPropertyName("filter")] QdrantFilter? Filter,
         [property: JsonPropertyName("limit")] int Limit,
         [property: JsonPropertyName("with_payload")] bool WithPayload);
 
@@ -256,7 +327,7 @@ public class QdrantClient
         [property: JsonPropertyName("text")] string Text);
 
     private sealed record QdrantScrollResponse(
-        [property: JsonPropertyName("result")] QdrantScrollResult Result);
+        [property: JsonPropertyName("result")] QdrantScrollResult? Result);
 
     private sealed record QdrantScrollResult(
         [property: JsonPropertyName("points")] IReadOnlyList<QdrantPointResult> Points);
@@ -264,3 +335,8 @@ public class QdrantClient
     private sealed record QdrantPointResult(
         [property: JsonPropertyName("payload")] QdrantPayload? Payload);
 }
+
+public sealed record QdrantDebugHttpResult(
+    object Request,
+    int StatusCode,
+    string RawResponseBody);
