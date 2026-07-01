@@ -49,6 +49,73 @@ public sealed class QdrantClientTests
         Assert.Empty(results);
     }
 
+    [Fact]
+    public async Task SearchByTextAsync_SplitsQuestionIntoExactSearchTerms()
+    {
+        var requestBodies = new List<string>();
+        var httpClient = new HttpClient(new StubHttpMessageHandler(request =>
+        {
+            requestBodies.Add(request.Content?.ReadAsStringAsync().GetAwaiter().GetResult() ?? "");
+            return new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent("""{"result":{"points":[]}}""", Encoding.UTF8, "application/json")
+            };
+        }));
+        var client = new QdrantClient(httpClient, CreateConfiguration());
+
+        await client.SearchByTextAsync("AOF DLQ Redis RabbitMQ nedir?", 10);
+
+        var terms = requestBodies
+            .Select(body => JsonDocument.Parse(body).RootElement
+                .GetProperty("filter")
+                .GetProperty("must")[0]
+                .GetProperty("match")
+                .GetProperty("text")
+                .GetString()!)
+            .ToArray();
+
+        Assert.Equal(["aof", "dlq", "redis", "rabbitmq"], terms);
+    }
+
+    [Fact]
+    public async Task SearchByTextAsync_MergesDuplicateTermMatches()
+    {
+        var documentId = Guid.NewGuid();
+        var httpClient = new HttpClient(new StubHttpMessageHandler(_ =>
+            new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent(
+                    $$"""
+                    {
+                      "result": {
+                        "points": [
+                          {
+                            "payload": {
+                              "documentId": "{{documentId}}",
+                              "chunkIndex": 0,
+                              "text": "Redis supports AOF persistence.",
+                              "fileName": "redis.pdf",
+                              "contentType": "application/pdf",
+                              "createdAt": "2026-01-01T00:00:00Z"
+                            }
+                          }
+                        ]
+                      }
+                    }
+                    """,
+                    Encoding.UTF8,
+                    "application/json")
+            }));
+        var client = new QdrantClient(httpClient, CreateConfiguration());
+
+        var results = await client.SearchByTextAsync("Redis AOF nedir?", 10);
+
+        Assert.Single(results);
+        Assert.Equal(documentId.ToString(), results[0].DocumentId);
+        Assert.Equal(2, results[0].Score);
+        Assert.Equal("redis.pdf", results[0].FileName);
+    }
+
     private static IConfiguration CreateConfiguration()
     {
         return new ConfigurationBuilder()

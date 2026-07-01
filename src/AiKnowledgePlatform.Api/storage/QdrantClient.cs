@@ -119,10 +119,45 @@ public class QdrantClient
         int limit,
         CancellationToken cancellationToken = default)
     {
+        var terms = ExtractTextSearchTerms(query);
+        if (limit <= 0 || terms.Count == 0)
+        {
+            return [];
+        }
+
+        var resultsByChunk = new Dictionary<(string DocumentId, int ChunkIndex), SearchResult>();
+
+        foreach (var term in terms)
+        {
+            var termResults = await SearchByTextTermAsync(term, limit, cancellationToken);
+            foreach (var result in termResults)
+            {
+                var key = (result.DocumentId, result.ChunkIndex);
+                if (resultsByChunk.TryGetValue(key, out var existing))
+                {
+                    resultsByChunk[key] = existing with { Score = existing.Score + 1 };
+                    continue;
+                }
+
+                resultsByChunk[key] = result with { Score = 1 };
+            }
+        }
+
+        return resultsByChunk.Values
+            .OrderByDescending(result => result.Score)
+            .Take(limit)
+            .ToArray();
+    }
+
+    private async Task<IReadOnlyList<SearchResult>> SearchByTextTermAsync(
+        string term,
+        int limit,
+        CancellationToken cancellationToken)
+    {
         var request = new ScrollPointsRequest(
             new QdrantFilter(
             [
-                new TextMatchCondition("text", new TextMatch(query))
+                new TextMatchCondition("text", new TextMatch(term))
             ]),
             limit,
             true);
@@ -139,12 +174,12 @@ public class QdrantClient
             JsonOptions,
             cancellationToken);
 
-        return scrollResponse?.Result.Points
+        return scrollResponse?.Result?.Points
             .Where(point => point.Payload is not null)
             .Select(point => new SearchResult(
                 point.Payload!.DocumentId,
                 point.Payload.ChunkIndex,
-                0,
+                1,
                 point.Payload.Text,
                 point.Payload.FileName))
             .ToArray() ?? [];
@@ -186,6 +221,68 @@ public class QdrantClient
         bytes[8] = (byte)((bytes[8] & 0x3F) | 0x80);
 
         return new Guid(bytes).ToString();
+    }
+
+    private static IReadOnlyList<string> ExtractTextSearchTerms(string query)
+    {
+        var stopwords = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            "a",
+            "an",
+            "and",
+            "are",
+            "as",
+            "be",
+            "by",
+            "do",
+            "does",
+            "for",
+            "how",
+            "in",
+            "is",
+            "it",
+            "of",
+            "on",
+            "or",
+            "that",
+            "the",
+            "this",
+            "to",
+            "what",
+            "with",
+            "why",
+            "ve",
+            "veya",
+            "bir",
+            "bu",
+            "su",
+            "icin",
+            "ile",
+            "mi",
+            "mı",
+            "mu",
+            "mü",
+            "da",
+            "de",
+            "ne",
+            "nedir",
+            "nasil",
+            "nasıl",
+            "olarak"
+        };
+
+        var separators = query
+            .Where(character => !char.IsLetterOrDigit(character))
+            .Distinct()
+            .ToArray();
+
+        return query
+            .Split(separators, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Select(term => term.ToLowerInvariant())
+            .Where(term => term.Length >= 2)
+            .Where(term => !stopwords.Contains(term))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
     }
 
     private sealed record CreateCollectionRequest(
