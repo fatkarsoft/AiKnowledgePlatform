@@ -1,4 +1,3 @@
-using AiKnowledgePlatform.Api.Storage;
 using Microsoft.Extensions.Options;
 
 namespace AiKnowledgePlatform.Api.Features.Search;
@@ -6,17 +5,20 @@ namespace AiKnowledgePlatform.Api.Features.Search;
 public sealed class HybridSearchService
 {
     private readonly SemanticSearchService _semanticSearchService;
-    private readonly QdrantClient _qdrantClient;
+    private readonly LexicalSearchService _lexicalSearchService;
     private readonly HybridSearchOptions _options;
+    private readonly ILogger<HybridSearchService> _logger;
 
     public HybridSearchService(
         SemanticSearchService semanticSearchService,
-        QdrantClient qdrantClient,
-        IOptions<HybridSearchOptions> options)
+        LexicalSearchService lexicalSearchService,
+        IOptions<HybridSearchOptions> options,
+        ILogger<HybridSearchService> logger)
     {
         _semanticSearchService = semanticSearchService;
-        _qdrantClient = qdrantClient;
+        _lexicalSearchService = lexicalSearchService;
         _options = options.Value;
+        _logger = logger;
     }
 
     public async Task<IReadOnlyList<SearchResult>> SearchAsync(
@@ -34,10 +36,16 @@ public sealed class HybridSearchService
         var finalLimit = Math.Max(1, Math.Min(candidateCount, _options.FinalCandidateCount));
 
         var semanticResults = await _semanticSearchService.SearchAsync(question, semanticLimit, cancellationToken);
-        var lexicalResults = await _qdrantClient.SearchByTextAsync(question, lexicalLimit, cancellationToken);
-
-        return MergeCandidates(semanticResults, lexicalResults)
+        var lexicalResults = await _lexicalSearchService.SearchAsync(question, lexicalLimit, cancellationToken);
+        var mergedCandidates = MergeCandidates(semanticResults, lexicalResults)
             .OrderByDescending(candidate => candidate.Score)
+            .ToArray();
+
+        _logger.LogInformation(
+            "Hybrid search merged candidate count: {CandidateCount}",
+            mergedCandidates.Length);
+
+        return mergedCandidates
             .Take(finalLimit)
             .Select(candidate => candidate.ToSearchResult())
             .ToArray();
@@ -58,6 +66,7 @@ public sealed class HybridSearchService
                 result.Text,
                 result.FileName,
                 result.Score,
+                LexicalScore: null,
                 LexicalMatched: false);
         }
 
@@ -66,7 +75,11 @@ public sealed class HybridSearchService
             var key = (result.DocumentId, result.ChunkIndex);
             if (candidates.TryGetValue(key, out var existing))
             {
-                candidates[key] = existing with { LexicalMatched = true };
+                candidates[key] = existing with
+                {
+                    LexicalScore = result.Score,
+                    LexicalMatched = true
+                };
                 continue;
             }
 
@@ -76,6 +89,7 @@ public sealed class HybridSearchService
                 result.Text,
                 result.FileName,
                 SemanticScore: null,
+                result.Score,
                 LexicalMatched: true);
         }
 

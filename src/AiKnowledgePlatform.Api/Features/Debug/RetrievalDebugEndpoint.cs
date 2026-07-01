@@ -16,7 +16,8 @@ public static class RetrievalDebugEndpoint
         app.MapPost("/debug/retrieval", async (
             RetrievalDebugRequest request,
             SemanticSearchService semanticSearchService,
-            QdrantClient qdrantClient,
+            LexicalSearchService lexicalSearchService,
+            ILoggerFactory loggerFactory,
             IServiceProvider services,
             IOptions<HybridSearchOptions> hybridSearchOptions,
             IOptions<RerankingOptions> rerankingOptions,
@@ -27,6 +28,7 @@ public static class RetrievalDebugEndpoint
                 return Results.BadRequest("Question is required.");
             }
 
+            var logger = loggerFactory.CreateLogger("RetrievalDebugEndpoint");
             var question = request.Question;
             var hybridOptions = hybridSearchOptions.Value;
             var rerankOptions = rerankingOptions.Value;
@@ -60,7 +62,7 @@ public static class RetrievalDebugEndpoint
                 var lexicalLimit = hybridOptions.LexicalCandidateCount > 0
                     ? hybridOptions.LexicalCandidateCount
                     : candidateCount;
-                lexicalResults = await qdrantClient.SearchByTextAsync(question, lexicalLimit, cancellationToken);
+                lexicalResults = await lexicalSearchService.SearchAsync(question, lexicalLimit, cancellationToken);
                 stageTimer.Stop();
                 lexicalSearchMs = stageTimer.ElapsedMilliseconds;
             }
@@ -72,6 +74,13 @@ public static class RetrievalDebugEndpoint
                 .ToArray();
             stageTimer.Stop();
             var mergeMs = stageTimer.ElapsedMilliseconds;
+
+            logger.LogInformation(
+                "Retrieval debug lexical candidate count: {LexicalCandidateCount}",
+                lexicalResults.Count);
+            logger.LogInformation(
+                "Retrieval debug merged candidate count: {MergedCandidateCount}",
+                mergedCandidates.Length);
 
             IReadOnlyList<DebugCandidate> rerankedCandidates;
             long rerankMs = 0;
@@ -166,7 +175,7 @@ public static class RetrievalDebugEndpoint
             candidate.FileName,
             CreatePreview(candidate.Text),
             candidate.SemanticScore,
-            candidate.LexicalMatched ? 1 : null,
+            candidate.LexicalScore,
             rerankScore,
             candidate.SemanticScore.HasValue,
             candidate.LexicalMatched);

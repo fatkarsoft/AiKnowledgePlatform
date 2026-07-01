@@ -6,9 +6,10 @@ public sealed record SearchCandidate(
     string Text,
     string FileName,
     double? SemanticScore,
+    double? LexicalScore,
     bool LexicalMatched)
 {
-    public double Score => SemanticScore.GetValueOrDefault() + (LexicalMatched ? 1 : 0);
+    public double Score => SemanticScore.GetValueOrDefault() + LexicalScore.GetValueOrDefault();
 
     public SearchResult ToSearchResult()
     {

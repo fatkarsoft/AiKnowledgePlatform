@@ -23,6 +23,7 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<PromptBuilder>();
         services.AddSingleton<KeywordOverlapReranker>();
         services.AddScoped<SemanticSearchService>();
+        services.AddScoped<LexicalSearchService>();
         services.AddScoped<HybridSearchService>();
         services.AddHttpClient<OllamaEmbeddingGenerator>();
         services.AddHttpClient<OllamaChatClient>();
