@@ -437,6 +437,21 @@ public sealed class DocumentsEndpointTests : IClassFixture<WebApplicationFactory
     }
 
     [Fact]
+    public async Task RetrievalDebug_WithAofQuestion_ReturnsLexicalCandidates()
+    {
+        var client = _factory.CreateClient();
+
+        var response = await client.PostAsJsonAsync(
+            "/debug/retrieval",
+            new RetrievalDebugRequest("AOF nedir?", null, null));
+        var debugResponse = await response.Content.ReadFromJsonAsync<RetrievalDebugResponse>();
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.NotNull(debugResponse);
+        Assert.NotEmpty(debugResponse.LexicalCandidates);
+    }
+
+    [Fact]
     public async Task UploadDocument_WithoutFile_ReturnsBadRequest()
     {
         var client = _factory.CreateClient();
@@ -679,6 +694,14 @@ public sealed class DocumentsEndpointTests : IClassFixture<WebApplicationFactory
             ];
 
             return Task.FromResult<IReadOnlyList<SearchResult>>(results.Take(topK).ToArray());
+        }
+
+        public override Task<IReadOnlyList<SearchResult>> SearchByTextAsync(
+            string query,
+            int limit,
+            CancellationToken cancellationToken = default)
+        {
+            return Task.FromResult<IReadOnlyList<SearchResult>>([]);
         }
     }
 }

@@ -4,12 +4,26 @@ using AiKnowledgePlatform.Api.Features.Documents.Embeddings;
 using AiKnowledgePlatform.Api.Features.Search;
 using AiKnowledgePlatform.Api.Storage;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 
 namespace AiKnowledgePlatform.Tests;
 
 public sealed class HybridSearchServiceTests
 {
+    [Theory]
+    [InlineData("AOF nedir?", "AOF")]
+    [InlineData("Redis persistence nedir?", "Redis", "persistence")]
+    [InlineData("RabbitMQ DLQ nasıl çalışır?", "RabbitMQ", "DLQ")]
+    public void ExtractSearchTerms_RemovesStopwordsAndPreservesTechnicalTerms(
+        string question,
+        params string[] expectedTerms)
+    {
+        var terms = LexicalSearchService.ExtractSearchTerms(question);
+
+        Assert.Equal(expectedTerms, terms);
+    }
+
     [Fact]
     public async Task SearchAsync_WhenHybridDisabled_UsesSemanticOnly()
     {
@@ -41,7 +55,7 @@ public sealed class HybridSearchServiceTests
 
         Assert.Single(results);
         Assert.Equal(documentId, results[0].DocumentId);
-        Assert.Equal(1.8, results[0].Score);
+        Assert.Equal(2.8, results[0].Score);
     }
 
     [Fact]
@@ -60,13 +74,39 @@ public sealed class HybridSearchServiceTests
         Assert.Contains(results, result => result.FileName == "lexical.pdf");
     }
 
+    [Fact]
+    public async Task SearchAsync_UsesExtractedLexicalTerms()
+    {
+        var semanticResult = CreateResult("semantic.pdf", 0, 0.8, "Semantic result");
+        var lexicalResult = CreateResult("aof.pdf", 1, 0, "AOF persistence result");
+        var qdrantClient = new FakeQdrantClient([semanticResult], [lexicalResult]);
+        var service = CreateService(
+            enabled: true,
+            qdrantClient);
+
+        var results = await service.SearchAsync("AOF nedir?", 20);
+
+        Assert.Contains(results, result => result.FileName == "aof.pdf");
+        Assert.Equal(["AOF"], qdrantClient.TextSearchQueries);
+    }
+
     private static HybridSearchService CreateService(
         bool enabled,
         IReadOnlyList<SearchResult> semanticResults,
         IReadOnlyList<SearchResult> lexicalResults)
     {
         var qdrantClient = new FakeQdrantClient(semanticResults, lexicalResults);
+        return CreateService(enabled, qdrantClient);
+    }
+
+    private static HybridSearchService CreateService(
+        bool enabled,
+        FakeQdrantClient qdrantClient)
+    {
         var semanticSearchService = new SemanticSearchService(new FakeOllamaEmbeddingGenerator(), qdrantClient);
+        var lexicalSearchService = new LexicalSearchService(
+            qdrantClient,
+            NullLogger<LexicalSearchService>.Instance);
         var options = Options.Create(new HybridSearchOptions
         {
             Enabled = enabled,
@@ -75,7 +115,11 @@ public sealed class HybridSearchServiceTests
             FinalCandidateCount = 20
         });
 
-        return new HybridSearchService(semanticSearchService, qdrantClient, options);
+        return new HybridSearchService(
+            semanticSearchService,
+            lexicalSearchService,
+            options,
+            NullLogger<HybridSearchService>.Instance);
     }
 
     private static SearchResult CreateResult(string fileName, int chunkIndex, double score, string text)
@@ -112,6 +156,8 @@ public sealed class HybridSearchServiceTests
             _lexicalResults = lexicalResults;
         }
 
+        public List<string> TextSearchQueries { get; } = [];
+
         public override Task EnsureCollectionAsync(CancellationToken cancellationToken = default)
         {
             return Task.CompletedTask;
@@ -139,6 +185,8 @@ public sealed class HybridSearchServiceTests
             int limit,
             CancellationToken cancellationToken = default)
         {
+            TextSearchQueries.Add(query);
+
             return Task.FromResult<IReadOnlyList<SearchResult>>(_lexicalResults.Take(limit).ToArray());
         }
     }
